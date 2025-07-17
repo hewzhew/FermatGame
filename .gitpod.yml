@@ -1,48 +1,61 @@
-# 使用项目内自定义的 Dockerfile 来构建环境
-# 这通常是为了安装一些系统级的依赖
-image:
-  file: .docker/gitpod/Dockerfile
+# .gitpod.yml
 
-# 指定需要为 VS Code 安装的插件
+tasks:
+  - name: Setup Environment & Project
+    # 'before' 任务在所有其他任务之前运行，是设置环境变量的最佳位置
+    before: |
+      # 1. 设置环境变量，让 elan 对所有子进程可见
+      # 将此行添加到 .bashrc，以便所有新的 bash shell 都能自动加载
+      echo 'export PATH="$HOME/.elan/bin:$PATH"' >> ~/.bashrc
+      # 立即在当前 shell 中应用这个环境变量
+      export PATH="$HOME/.elan/bin:$PATH"
+
+      # 2. 检查 Elan 是否已安装，如果没装就装上
+      if ! command -v elan &> /dev/null
+      then
+        echo "Installing Elan (Lean toolchain manager)..."
+        # 安装 elan，并让它自动修改 shell 配置文件
+        curl https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -sSf | sh -s -- -y
+      fi
+
+      # 3. 再次应用，确保 elan-init 的修改也生效
+      source ~/.bashrc
+
+    # 'init' 任务只在工作区第一次创建时运行
+    init: |
+      # 1. 更新系统包列表并安装 C++ 构建工具
+      echo "Installing system dependencies (C++ toolchain)..."
+      sudo apt-get update && sudo apt-get install -y build-essential
+
+      # 2. 更新 Lake 依赖
+      echo "Updating Lake dependencies..."
+      lake update
+
+      # 3. 下载 mathlib 缓存
+      echo "Fetching mathlib cache..."
+      lake exe cache get
+
+      # 4. 完整构建一次项目
+      echo "Building project..."
+      lake build
+
+    # 'command' 任务在每次工作区启动时都会运行
+    command: |
+      echo "Workspace is ready. Use 'lake serve' to start the game server."
+      echo "--- Checking versions ---"
+      lean --version
+      lake --version
+      c++ --version
+      echo "-----------------------"
+
+# VS Code 插件配置
 vscode:
   extensions:
     - leanprover.lean4
 
-# 定义工作区启动时要执行的任务
-tasks:
-  # 'init' 任务只在工作区第一次创建时运行，非常适合放耗时的操作
-  - name: Setup & Build
-    init: |
-      # 1. 更新 Lake 依赖，下载 mathlib 等
-      echo "Updating Lake dependencies..."
-      lake update
-
-      # 2. 下载 mathlib 的预编译缓存，节省大量时间
-      echo "Fetching mathlib cache..."
-      lake exe cache get
-
-      # 3. 完整构建一次项目，这样打开文件时 Lean Server 响应会非常快
-      echo "Building project..."
-      lake build
-
-  # 'command' 任务在每次工作区启动或重启时都会运行
-  - name: Environment Check
-    command: |
-      # 检查并安装必要的系统工具（比如 gcc, lsof 等），以防 Dockerfile 里没有
-      echo "Checking system dependencies..."
-      sudo apt-get update && sudo apt-get --assume-yes install gcc lsof
-
-      # 打印 Lean 版本，确认环境正常
-      echo "Lean version:"
-      lean --version
-
-# 配置端口转发，这是最关键的部分
+# 端口配置
 ports:
-  # 监听 8080 端口，这是 `lake serve` 的默认端口
   - port: 8080
-    # 当服务在这个端口上启动时，Gitpod 的行为
     onOpen: open-preview
-    # 可选：给这个端口起个名字，在 UI 上更好看
     name: Game Preview
-    # 可选：描述一下这个端口是干嘛的
     description: Live preview of the Lean Game
